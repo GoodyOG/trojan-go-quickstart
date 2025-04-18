@@ -91,8 +91,8 @@ useradd -r -m -G certusers acme || echo "User already exists."
 #安装acme.sh Trojan需要的依赖
 apt install -y cron socat curl unzip
 #启动crontab
-systemctl start cron
-systemctl enable cron
+sudo systemctl start cron
+sudo systemctl enable cron
 
 #安装Nginx
 apt install -y nginx
