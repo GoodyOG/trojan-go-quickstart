@@ -54,7 +54,7 @@ else
 fi
 
 # Get user input
-read -p "Please enter your domain name (e.g., vpn.abc.com): " DOMAINNAME
+read -p "Please enter your domain name (e.g., vpn.example.com): " DOMAINNAME
 [ -z "$DOMAINNAME" ] && { echo "Domain name cannot be empty."; exit 1; }
 
 read -p "Please enter the E-Mail address for SSL certificate: " EMAIL
@@ -102,36 +102,41 @@ echo "Configuring Nginx..."
 # Ensure sites-available and sites-enabled directories exist
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 
-# Remove default site if present
+# Remove default site and any conflicting configurations
 [ -f "/etc/nginx/sites-enabled/default" ] && rm /etc/nginx/sites-enabled/default
+[ -f "/etc/nginx/sites-enabled/$DOMAINNAME" ] && rm /etc/nginx/sites-enabled/$DOMAINNAME
 
-# Create Nginx configuration for the domain
+# Create Nginx configuration for HTTP-01 challenge
 cat > "/etc/nginx/sites-available/$DOMAINNAME" << EOF
 server {
     listen 127.0.0.1:80;
-    server_name $DOMAINNAME;
+    listen 0.0.0.0:80;
+    listen [::]:80;
+    server_name $DOMAINNAME $PUBLICIP;
+
+    location /.well-known/acme-challenge {
+        root /var/www/acme-challenge;
+        allow all;
+    }
 
     location / {
         root /usr/share/nginx/html;
         index index.html index.htm;
     }
-
-    location /.well-known/acme-challenge {
-        root /var/www/acme-challenge;
-    }
-}
-
-server {
-    listen 0.0.0.0:80;
-    listen [::]:80;
-    server_name $PUBLICIP _;
-
-    return 301 https://$DOMAINNAME\$request_uri;
 }
 EOF
 
 # Enable the configuration
 ln -sf /etc/nginx/sites-available/$DOMAINNAME /etc/nginx/sites-enabled/$DOMAINNAME
+
+# Fix permissions for acme-challenge directory
+mkdir -p /var/www/acme-challenge
+chown -R acme:certusers /var/www/acme-challenge
+chmod -R 755 /var/www/acme-challenge
+
+# Add Nginx user to certusers group
+NGINXUSER="www-data"
+usermod -aG certusers $NGINXUSER
 
 # Test Nginx configuration
 sudo nginx -t || { echo "Nginx configuration test failed."; exit 1; }
@@ -139,28 +144,26 @@ sudo nginx -t || { echo "Nginx configuration test failed."; exit 1; }
 # Start and enable Nginx
 sudo systemctl enable nginx --now || { echo "Failed to enable/start Nginx."; exit 1; }
 
-# Create certificate and challenge directories
-mkdir -p /etc/letsencrypt/live /var/www/acme-challenge
-chown -R acme:certusers /etc/letsencrypt/live /var/www/acme-challenge
-chmod -R 750 /etc/letsencrypt/live /var/www/acme-challenge
+# Configure firewall
+echo "Configuring firewall..."
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw reload
 
-# Add Nginx user to certusers group
-NGINXUSER="www-data"  # Ubuntu default
-usermod -aG certusers $NGINXUSER
-
-# Install acme.sh
-echo "Installing acme.sh..."
-su -l -s /bin/bash acme << EOF
-curl https://get.acme.sh | sh -s email=$EMAIL || exit 1
-~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-~/.acme.sh/acme.sh --issue -d $DOMAINNAME -w /var/www/acme-challenge || exit 1
-~/.acme.sh/acme.sh --install-cert -d $DOMAINNAME \
+# Install acme.sh and issue SSL certificate using HTTP-01 challenge
+echo "Installing acme.sh and issuing SSL certificate..."
+sudo su - acme -c "curl https://get.acme.sh | sh -s email=$EMAIL" || { echo "Failed to install acme.sh."; exit 1; }
+sudo su - acme -c "~/.acme.sh/acme.sh --set-default-ca --server letsencrypt" || { echo "Failed to set Let’s Encrypt as CA."; exit 1; }
+sudo su - acme -c "~/.acme.sh/acme.sh --issue -d $DOMAINNAME -w /var/www/acme-challenge --force" || { echo "Failed to issue SSL certificate."; exit 1; }
+sudo su - acme -c "~/.acme.sh/acme.sh --install-cert -d $DOMAINNAME \
     --key-file /etc/letsencrypt/live/${DOMAINNAME}-private.key \
-    --fullchain-file /etc/letsencrypt/live/${DOMAINNAME}-certificate.crt || exit 1
-~/.acme.sh/acme.sh --upgrade --auto-upgrade
+    --fullchain-file /etc/letsencrypt/live/${DOMAINNAME}-certificate.crt" || { echo "Failed to install SSL certificate."; exit 1; }
+sudo su - acme -c "~/.acme.sh/acme.sh --upgrade --auto-upgrade" || { echo "Failed to enable auto-upgrade for acme.sh."; exit 1; }
+
+# Fix certificate permissions
+mkdir -p /etc/letsencrypt/live
 chown -R acme:certusers /etc/letsencrypt/live
 chmod -R 750 /etc/letsencrypt/live
-EOF
 
 # Install Trojan-Go
 echo "Installing Trojan-Go..."
@@ -173,6 +176,7 @@ install -Dm755 "$NAME" "$BINARYPATH"
 
 # Install server configuration
 if [[ ! -f "$CONFIGPATH" ]] || prompt "Config $CONFIGPATH exists, overwrite?"; then
+    mkdir -p /etc/$NAME
     cat > "$CONFIGPATH" << EOF
 {
     "run_type": "server",
@@ -247,11 +251,5 @@ echo "Domain name : $DOMAINNAME"
 echo "Trojan-Go password : $TROJANGOPASSWORD"
 echo "SSL certificates: /etc/letsencrypt/live/$DOMAINNAME"
 echo -e "-----------------------------------\n"
-
-# Configure UFW
-echo "Configuring firewall..."
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw reload
 
 echo "Installation complete!"
