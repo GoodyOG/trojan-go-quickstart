@@ -29,9 +29,9 @@ Special reminder, this program will automatically install and configure Nginx an
 
 - via `curl`
     ```
-    sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/yes8080/trojan-go-quickstart/master/trojan-go-quickstart.sh)"
+    sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/GoodyOG/trojan-go-quickstart/master/trojan-go-quickstart.sh)"
     ```
 - via `wget`
     ```
-    sudo bash -c "$(wget -O- https://raw.githubusercontent.com/yes8080/trojan-go-quickstart/master/trojan-go-quickstart.sh)"
+    sudo bash -c "$(wget -O- https://raw.githubusercontent.com/GoodyOG/trojan-go-quickstart/master/trojan-go-quickstart.sh)"
     ```
