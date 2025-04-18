@@ -54,7 +54,7 @@ else
 fi
 
 # Get user input
-read -p "Please enter your domain name (e.g., vpn.example.com): " DOMAINNAME
+read -p "Please enter your domain name (e.g., trans.server85.xyz): " DOMAINNAME
 [ -z "$DOMAINNAME" ] && { echo "Domain name cannot be empty."; exit 1; }
 
 read -p "Please enter the E-Mail address for SSL certificate: " EMAIL
@@ -83,7 +83,7 @@ prompt "Please confirm the configuration and proceed with installation?" || exit
 # Install dependencies
 echo "Installing dependencies..."
 sudo apt update
-sudo apt install -y cron socat curl unzip nginx || { echo "Failed to install dependencies."; exit 1; }
+sudo apt install -y cron socat curl unzip nginx certbot || { echo "Failed to install dependencies."; exit 1; }
 
 # Start and enable cron
 sudo systemctl enable cron --now || { echo "Failed to enable/start cron."; exit 1; }
@@ -92,7 +92,28 @@ sudo systemctl enable cron --now || { echo "Failed to enable/start cron."; exit 
 echo "Creating service accounts..."
 groupadd -f certusers
 useradd -r -M -G certusers -s /usr/sbin/nologin trojan 2>/dev/null || echo "User trojan already exists."
-useradd -r -m -G certusers -s /bin/bash acme 2>/dev/null || echo "User acme already exists."
+useradd -r -m -G certusers -s /bin/bash certbot 2>/dev/null || echo "User certbot already exists."
+
+# Configure firewall
+echo "Configuring firewall..."
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw reload || { echo "Failed to configure firewall."; exit 1; }
+
+# Stop Nginx temporarily for Certbot standalone
+echo "Stopping Nginx for Certbot standalone SSL issuance..."
+sudo systemctl stop nginx || { echo "Failed to stop Nginx."; exit 1; }
+
+# Issue SSL certificate using Certbot standalone
+echo "Issuing SSL certificate with Certbot..."
+sudo certbot certonly --standalone -d "$DOMAINNAME" --non-interactive --agree-tos -m "$EMAIL" || { echo "Failed to issue SSL certificate."; exit 1; }
+
+# Move certificates to consistent location
+mkdir -p /etc/letsencrypt/live
+cp /etc/letsencrypt/live/$DOMAINNAME/fullchain.pem /etc/letsencrypt/live/$DOMAINNAME-certificate.crt
+cp /etc/letsencrypt/live/$DOMAINNAME/privkey.pem /etc/letsencrypt/live/$DOMAINNAME-private.key
+chown -R certbot:certusers /etc/letsencrypt/live
+chmod -R 750 /etc/letsencrypt/live
 
 # Configure Nginx
 echo "Configuring Nginx..."
@@ -106,18 +127,13 @@ mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 [ -f "/etc/nginx/sites-enabled/default" ] && rm /etc/nginx/sites-enabled/default
 [ -f "/etc/nginx/sites-enabled/$DOMAINNAME" ] && rm /etc/nginx/sites-enabled/$DOMAINNAME
 
-# Create Nginx configuration for HTTP-01 challenge
+# Create Nginx configuration
 cat > "/etc/nginx/sites-available/$DOMAINNAME" << EOF
 server {
     listen 127.0.0.1:80;
     listen 0.0.0.0:80;
     listen [::]:80;
     server_name $DOMAINNAME $PUBLICIP;
-
-    location /.well-known/acme-challenge {
-        root /var/www/acme-challenge;
-        allow all;
-    }
 
     location / {
         root /usr/share/nginx/html;
@@ -129,11 +145,6 @@ EOF
 # Enable the configuration
 ln -sf /etc/nginx/sites-available/$DOMAINNAME /etc/nginx/sites-enabled/$DOMAINNAME
 
-# Fix permissions for acme-challenge directory
-mkdir -p /var/www/acme-challenge
-chown -R acme:certusers /var/www/acme-challenge
-chmod -R 755 /var/www/acme-challenge
-
 # Add Nginx user to certusers group
 NGINXUSER="www-data"
 usermod -aG certusers $NGINXUSER
@@ -143,27 +154,6 @@ sudo nginx -t || { echo "Nginx configuration test failed."; exit 1; }
 
 # Start and enable Nginx
 sudo systemctl enable nginx --now || { echo "Failed to enable/start Nginx."; exit 1; }
-
-# Configure firewall
-echo "Configuring firewall..."
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw reload
-
-# Install acme.sh and issue SSL certificate using HTTP-01 challenge
-echo "Installing acme.sh and issuing SSL certificate..."
-sudo su - acme -c "curl https://get.acme.sh | sh -s email=$EMAIL" || { echo "Failed to install acme.sh."; exit 1; }
-sudo su - acme -c "~/.acme.sh/acme.sh --set-default-ca --server letsencrypt" || { echo "Failed to set Let’s Encrypt as CA."; exit 1; }
-sudo su - acme -c "~/.acme.sh/acme.sh --issue -d $DOMAINNAME -w /var/www/acme-challenge --force" || { echo "Failed to issue SSL certificate."; exit 1; }
-sudo su - acme -c "~/.acme.sh/acme.sh --install-cert -d $DOMAINNAME \
-    --key-file /etc/letsencrypt/live/${DOMAINNAME}-private.key \
-    --fullchain-file /etc/letsencrypt/live/${DOMAINNAME}-certificate.crt" || { echo "Failed to install SSL certificate."; exit 1; }
-sudo su - acme -c "~/.acme.sh/acme.sh --upgrade --auto-upgrade" || { echo "Failed to enable auto-upgrade for acme.sh."; exit 1; }
-
-# Fix certificate permissions
-mkdir -p /etc/letsencrypt/live
-chown -R acme:certusers /etc/letsencrypt/live
-chmod -R 750 /etc/letsencrypt/live
 
 # Install Trojan-Go
 echo "Installing Trojan-Go..."
