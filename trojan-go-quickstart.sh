@@ -89,8 +89,7 @@ useradd -r -m -G certusers acme || echo "User already exists."
 
 
 #安装acme.sh Trojan需要的依赖
-dnf install --allowerasing -y cronie socat curl unzip
-
+apt install -y cron socat curl unzip
 #启动crontab
 systemctl start crond
 systemctl enable crond
