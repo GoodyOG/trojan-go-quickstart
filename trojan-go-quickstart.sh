@@ -112,8 +112,6 @@ sed -i '/conf.d\/\*.conf/a\    include \/etc\/nginx\/sites-enabled\/\*;' /etc/ng
 [ -d "/etc/nginx/sites-available" ] || mkdir /etc/nginx/sites-available
 [ -d "/etc/nginx/sites-enabled" ] || mkdir /etc/nginx/sites-enabled
 
-#CentOS反向代理需要配置SELinux允许httpd模块可以联网 否则服务器会返回502错误
-setsebool -P httpd_can_network_connect true
 
 # Ubuntu or Debian 使用如下命令关闭Nginx默认虚拟主机
 # rm /etc/nginx/sites-enabled/default
