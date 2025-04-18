@@ -87,7 +87,6 @@ groupadd -f certusers
 useradd -r -M -G certusers trojan || echo "User already exists."
 useradd -r -m -G certusers acme || echo "User already exists."
 
-yum update -y 
 
 #安装acme.sh Trojan需要的依赖
 dnf install --allowerasing -y cronie socat curl unzip
