@@ -96,7 +96,7 @@ systemctl start crond
 systemctl enable crond
 
 #安装Nginx
-dnf install -y nginx
+apt install -y nginx
 
 #从备份恢复
 if [ -f "/etc/nginx/nginx.conf.bak996" ] ; then
